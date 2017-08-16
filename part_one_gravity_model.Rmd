@@ -190,3 +190,6 @@ infectious_period_length[,1] <- as.numeric(infectious_period_length[,1])
 
 ```
 
+##Description
+
+Want to make a violin plot to visualize this data.
