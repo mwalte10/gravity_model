@@ -1,0 +1,192 @@
+---
+title: "Part one"
+author: "Maggie Walters"
+date: "August 14, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+data <- read.csv("spm.data.long.csv")
+data <- subset(data, data$CONCLUSION == "CLINICAL" | data$CONCLUSION == "CONFIRMED")
+county_vec <- unique(data$COUNTY)
+install.packages("ggplot2")
+```
+
+## Determine the distribution of outbreak sizes
+```{r Outbreak sizes}
+outbreakSizeVector <- rep(NA, length(county_vec))
+names(outbreakSizeVector) <- county_vec
+for(i in 1:length(county_vec)){
+  outbreakSizeVector[i] <- length(which(data$COUNTY == county_vec[i]))
+}
+
+#Quantile vales of outbreak sizes
+quantile(outbreakSizeVector)
+which.smallOutbreak <- which(outbreakSizeVector < 2)
+
+#make status mat
+status_mat <- matrix(rep(NA, length(county_vec) * 53), ncol = length(county_vec))
+colnames(status_mat) <- county_vec
+rownames(status_mat) <- seq(1:53)
+for(i in 1:length(county_vec)){
+  for(j in 1:53){
+    x <- subset(data, data$COUNTY == county_vec[i] & data$WEEK == j)
+    status_mat[j,i] <- nrow(x)
+  }
+}
+status_mat <- as.data.frame(status_mat)
+
+#parse down status mat to only those with more than one outbreak
+status_mat <- status_mat[,-which.smallOutbreak]
+
+#Find those with two weeks infection free after an outbreak
+binary_status_mat <- matrix(ncol = dim(status_mat)[2], nrow = dim(status_mat)[1], NA)
+for(i in 1:dim(status_mat)[2]){
+  for(j in 1:dim(status_mat)[1])
+  if(status_mat[j,i] != 0){
+    binary_status_mat[j,i] <- 1
+  }else{
+    binary_status_mat[j,i] <- 0
+  }
+}
+
+reSusceptible_counties <- binary_status_mat
+for(i in 1:dim(status_mat)[2]){
+  for(j in 1:50){
+    if(binary_status_mat[j,i] == 1 & binary_status_mat[j+1,i] == 0 & binary_status_mat[j+2,i] == 0 & binary_status_mat[j+3,i] == 0){
+      reSusceptible_counties[j+3,i] <- "RESUSCEPTIBLE"
+    }
+  }
+}
+
+#fill in susceptible for inital zeros
+for(i in 1:dim(status_mat)[2]){
+  first_case <- which(reSusceptible_counties[,i] == 1)[1]
+  reSusceptible_counties[1:first_case - 1, i] <- "SUSCEPTIBLE"
+}
+
+for(i in 1:dim(status_mat)[2]){
+  for(j in 3:50){
+if(reSusceptible_counties[j,i] == 0 & reSusceptible_counties[j-1, i] != 1 & reSusceptible_counties[j-2, i] != 1){
+  reSusceptible_counties[j,i] <- "RESUSCEPTIBLE"
+}
+    print(i)
+    print(j)
+}}
+
+```
+
+
+## Summary of Outbreak sizes chunk
+
+All counties with only one case can definitely be considered susceptible after their initial infection. `r length(which.smallOutbreak)` counties were found to only have one case. 
+
+For counties with more than one case, if a county has not experienced infeciton in the previous two weeks, that county is considered "RESUSCEPTIBLE". 
+
+To visualize this, a graph comparing infectious periods and susceptible periods will be created.
+
+```{r Graphics pre-work}
+#infectious period
+infectious_period <- matrix(nrow = length(names(status_mat)), ncol = 53)
+row.names(infectious_period) <- names(status_mat)
+for(i in 1:283){
+  infectious_period[i,] <- c(which(reSusceptible_counties[,i] == 1 | 
+                                     reSusceptible_counties[,i] == 0), 
+                             rep(NA, 53 - length(which(reSusceptible_counties[,i] == 1 | 
+                                                         reSusceptible_counties[,i] == 0))))
+}
+as.data.frame(infectious_period)
+
+infectious_period <- t(infectious_period)
+infectious_period <- as.vector(infectious_period)
+infectious_period_new <- matrix(infectious_period, nrow = length(infectious_period), ncol = 2)
+infectious_period_new[1:53,2] <- rep(names(status_mat)[1], 53)
+for(i in 2:283){
+  x <- (i - 1) * 53
+  infectious_period_new[x + (1 : 53),2] <- rep(names(status_mat)[i], 53)
+}
+infectious_period_new <- as.data.frame(infectious_period_new)
+remove <- which(is.na(infectious_period_new[,1]))
+infectious_period_new <- infectious_period_new[-remove,]
+infectious_period_new[,1] <- as.integer(infectious_period_new[,1])
+
+#susceptible period
+susceptible_period <- matrix(nrow = length(names(status_mat)), ncol = 53)
+row.names(susceptible_period) <- names(status_mat)
+for(i in 2:283){
+  x <- which(reSusceptible_counties[,i] == "SUSCEPTIBLE" | reSusceptible_counties[,i] == "RESUSCEPTIBLE")
+  susceptible_period[i,] <- c(x, rep(NA, 53 - length(x)))
+}
+as.data.frame(susceptible_period)
+
+susceptible_period <- t(susceptible_period)
+susceptible_period <- as.vector(susceptible_period)
+susceptible_period_new <- matrix(susceptible_period, nrow = length(susceptible_period), ncol = 2)
+susceptible_period_new[1:53,2] <- rep(names(status_mat)[1], 53)
+for(i in 2:283){
+  x <- (i - 1) * 53
+  susceptible_period_new[x + (1 : 53),2] <- rep(names(status_mat)[i], 53)
+}
+susceptible_period_new <- as.data.frame(susceptible_period_new)
+remove <- which(is.na(susceptible_period_new[,1]))
+susceptible_period_new <- susceptible_period_new[-remove,]
+susceptible_period_new[,1] <- as.integer(susceptible_period_new[,1])
+
+
+```
+
+```{r Graphics}
+#horizontal line graph
+qplot(infectious_period_new[,1], infectious_period_new[,2],
+      data = infectious_period_new, 
+      ylab = "COUNTY",
+      xlab = "WEEK",
+      geom = "line") 
+#density plot
+infectious_density_plot <- qplot(infectious_period_new[,1], 
+      data = infectious_period_new, 
+      ylab = "DENSTIY",
+      xlab = "WEEK",
+      main = "Infectious County Density by Week",
+      geom = "density") 
+
+
+#horizontal line graph
+qplot(susceptible_period_new[,1], susceptible_period_new[,2],
+      data = susceptible_period_new, 
+      ylab = "COUNTY",
+      xlab = "WEEK",
+      geom = "line") 
+#density plot
+susceptible_density_plot <- qplot(susceptible_period_new[,1], 
+      data = susceptible_period_new,
+      ylab = "DENSTIY",
+      xlab = "WEEK",
+      main = "Susceptible County Density by Week",
+      geom = "density")
+
+```
+
+```{r stats}
+#infectious period
+infectious_period <- matrix(nrow = length(names(status_mat)), ncol = 53)
+row.names(infectious_period) <- names(status_mat)
+for(i in 1:283){
+  infectious_period[i,] <- c(which(reSusceptible_counties[,i] == 1 | 
+                                     reSusceptible_counties[,i] == 0), 
+                             rep(NA, 53 - length(which(reSusceptible_counties[,i] == 1 | 
+                                                         reSusceptible_counties[,i] == 0))))
+}
+as.data.frame(infectious_period)
+
+infectious_period_length <- matrix(NA, nrow = 283, ncol = 2)
+infectious_period_length[,2] <- unique(names(status_mat))
+for(i in 1:283){
+  infectious_period_length[i,1] <- length(which(!is.na(infectious_period[i,])))
+}
+infectious_period_length <- as.data.frame(infectious_period_length)
+infectious_period_length[,1] <- as.numeric(infectious_period_length[,1])
+
+```
+
